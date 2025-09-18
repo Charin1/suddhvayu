@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.egg-info/
+.eggs/
+*.log
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb_convert
+.notebooks_temp/
+
+# Data
+data/raw/*
+!data/raw/README.md      # keep a placeholder file
+data/processed/*
+!data/processed/README.md
+data/external/*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# Streamlit cache
+.streamlit/
+.dashboard_cache/
+
+# Reports / exports
+reports/figures/*
+*.html
+*.pdf
+
+# Logs & temp
+logs/
+tmp/
