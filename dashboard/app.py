@@ -20,7 +20,6 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 
 # --- Helper & Data Loading (Unchanged) ---
 def get_aqi_alert(pm25_value):
-    # ... (same function)
     if pm25_value <= 30: return "Good", "Air quality is excellent. Enjoy outdoor activities!", "success"
     if 31 <= pm25_value <= 60: return "Satisfactory", "Air quality is acceptable. Sensitive individuals may experience minor respiratory symptoms.", "info"
     if 61 <= pm25_value <= 90: return "Moderate", "Sensitive groups should reduce prolonged or heavy outdoor exertion.", "warning"
@@ -38,7 +37,7 @@ st.title("🌬️ ShuddhVayu: Gujarat Air Quality Dashboard")
 tab_eda, tab_forecast = st.tabs(["📊 Exploratory Data Analysis", "🔮 Ahmedabad Forecast"])
 
 with tab_eda:
-    # ... (This tab's code is unchanged) ...
+    # This tab's code is unchanged
     st.header("Explore Historical Air Quality Data")
     df_processed = load_data(PROCESSED_DATA_PATH)
     if df_processed is None: st.error("Processed data not found.")
@@ -65,11 +64,9 @@ with tab_eda:
 with tab_forecast:
     st.header("🔮 Forecast for Ahmedabad")
     
-    # --- NEW: Dropdown to select the target pollutant ---
     forecast_targets = ['PM2.5', 'PM10', 'NO2', 'CO', 'SO2', 'O3', 'AQI']
     selected_target = st.selectbox("Select a Pollutant to Forecast", forecast_targets)
 
-    # --- NEW: Dynamic model path based on selection ---
     MODEL_SAVE_PATH = os.path.join(MODELS_DIR, f"xgboost_{selected_target}_model.joblib")
 
     df_model_features = load_data(MODEL_FEATURES_PATH)
@@ -104,15 +101,36 @@ with tab_forecast:
                 col2.markdown("##### Training Data Range"); col2.write(f"{start_date} to {end_date}")
                 col3.markdown("##### Last Trained"); col3.write(train_time)
 
+            # --- FIX: Made the entire performance table dynamic ---
+            st.subheader("Recent Model Performance (Last 14 Days)")
+            
+            df_recent_history = df_model_features.tail(14).copy()
+            FEATURES = [col for col in df_recent_history.columns if col not in [selected_target, 'Date', 'City', 'AQI_Bucket']]
+            recent_predictions = model.predict(df_recent_history[FEATURES])
+            
+            df_performance = pd.DataFrame({
+                'Date': pd.to_datetime(df_recent_history['Date']).dt.strftime('%Y-%m-%d'),
+                f'Actual {selected_target}': df_recent_history[selected_target],
+                f'Predicted {selected_target}': recent_predictions
+            })
+            
+            df_performance['Error'] = df_performance[f'Actual {selected_target}'] - df_performance[f'Predicted {selected_target}']
+            
+            styler = df_performance.style.format({
+                f'Actual {selected_target}': '{:.2f}',
+                f'Predicted {selected_target}': '{:.2f}',
+                'Error': '{:+.2f}'
+            }).hide(axis="index")
+            st.dataframe(styler, use_container_width=True)
+
+            # --- Health Advisory and Forecast Plot ---
             last_data_point = df_model_features.tail(1)
             last_date = pd.to_datetime(last_data_point['Date'].iloc[0])
             future_dates = pd.to_datetime([last_date + pd.DateOffset(days=i) for i in range(1, 8)])
             
-            # --- NEW: Pass selected target to predict function ---
             predictions = predict(model, last_data_point, future_dates, selected_target)
             df_forecast = pd.DataFrame({'Date': future_dates, f'Predicted {selected_target}': predictions})
 
-            # Only show Health Advisory if forecasting PM2.5
             if selected_target == 'PM2.5':
                 st.subheader("Health Advisory for Tomorrow")
                 next_day_forecast_val = df_forecast[f'Predicted {selected_target}'].iloc[0]
