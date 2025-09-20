@@ -20,6 +20,26 @@ MODELS_DIR = "models"
 os.makedirs(MODELS_DIR, exist_ok=True)
 MODEL_SAVE_PATH = os.path.join(MODELS_DIR, "xgboost_pm25_model.joblib")
 
+# --- Helper Function for Phase 3 ---
+def get_aqi_alert(pm25_value):
+    """
+    Classifies a PM2.5 value into an AQI category and returns an alert message,
+    a recommendation, and a Streamlit alert type (info, success, warning, error).
+    Note: This is a simplified mapping based on common AQI breakpoints.
+    """
+    if pm25_value <= 30:
+        return "Good", "Air quality is excellent. Enjoy outdoor activities!", "success"
+    elif 31 <= pm25_value <= 60:
+        return "Satisfactory", "Air quality is acceptable. Sensitive individuals may experience minor respiratory symptoms.", "info"
+    elif 61 <= pm25_value <= 90:
+        return "Moderate", "Sensitive groups (children, elderly, asthmatics) should reduce prolonged or heavy outdoor exertion.", "warning"
+    elif 91 <= pm25_value <= 120:
+        return "Poor", "Everyone should reduce heavy outdoor exertion. People with heart or lung disease should avoid it entirely.", "error"
+    elif 121 <= pm25_value <= 250:
+        return "Very Poor", "Avoid all outdoor physical activity. Sensitive groups should remain indoors.", "error"
+    else: # pm25_value > 250
+        return "Severe", "Remain indoors and keep activity levels low. A health advisory is in effect.", "error"
+
 # --- Data Loading ---
 @st.cache_data
 def load_data(path):
@@ -74,23 +94,15 @@ else:
             if not os.path.exists(MODEL_SAVE_PATH):
                 st.info("Forecasting model not found. Please train the model using the button above.")
             else:
-                # --- FIX: Handle both old and new model file formats ---
                 loaded_object = joblib.load(MODEL_SAVE_PATH)
                 
                 mae = None
                 if isinstance(loaded_object, dict):
-                    # New format: a dictionary containing the model and MAE
                     model = loaded_object['model']
                     mae = loaded_object['mae']
                 else:
-                    # Old format: just the model object
                     model = loaded_object
                 
-                if mae:
-                    st.metric(label="Model's Average Error (MAE)", value=f"{mae:.2f} PM2.5")
-                else:
-                    st.warning("This is an old model file. Please retrain the model to see the confidence interval.")
-
                 last_data_point = df_model_features.tail(1)
                 last_date = pd.to_datetime(last_data_point['Date'].iloc[0])
                 future_dates = pd.to_datetime([last_date + pd.DateOffset(days=i) for i in range(1, 8)])
@@ -99,9 +111,25 @@ else:
                 
                 df_forecast = pd.DataFrame({'Date': future_dates, 'Predicted PM2.5': predictions})
 
-                st.subheader("Next 7-Day PM2.5 Forecast")
+                # --- NEW: Display the Alert for Tomorrow ---
+                st.subheader("Health Advisory for Tomorrow")
+                next_day_forecast = df_forecast['Predicted PM2.5'].iloc[0]
+                category, recommendation, alert_type = get_aqi_alert(next_day_forecast)
 
-                # Only show confidence interval if MAE is available
+                with st.container(border=True):
+                    st.metric(label=f"Tomorrow's Forecasted Category: {category}", value=f"{next_day_forecast:.2f} PM2.5")
+                    
+                    if alert_type == "success":
+                        st.success(f"**Recommendation:** {recommendation}")
+                    elif alert_type == "info":
+                        st.info(f"**Recommendation:** {recommendation}")
+                    elif alert_type == "warning":
+                        st.warning(f"**Recommendation:** {recommendation}")
+                    elif alert_type == "error":
+                        st.error(f"**Recommendation:** {recommendation}")
+
+                st.subheader("Next 7-Day PM2.5 Forecast with Confidence Interval")
+
                 if mae:
                     df_forecast['Upper Bound'] = df_forecast['Predicted PM2.5'] + mae
                     df_forecast['Lower Bound'] = df_forecast['Predicted PM2.5'] - mae
@@ -113,7 +141,7 @@ else:
                     ])
                     forecast_fig.update_layout(title="Forecasted PM2.5 Levels with Confidence Interval", yaxis_title='PM2.5 Concentration', hovermode="x")
                 else:
-                    # Fallback to a simple plot if no MAE
+                    st.warning("Retrain the model to see the confidence interval.")
                     forecast_fig = px.line(df_forecast, x='Date', y='Predicted PM2.5', title="Forecasted PM2.5 Levels", markers=True)
 
                 st.plotly_chart(forecast_fig, use_container_width=True)
