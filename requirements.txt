@@ -31,3 +31,16 @@ referencing
 rpds-py
 jinja2
 markupsafe
+joblib
+scikit-learn
+xgboost
+# shap
+notebook
+ipykernel
+pillow
+pyparsing
+cycler
+kiwisolver
+scipy
+watchdog
+threadpoolctl==3.6.0

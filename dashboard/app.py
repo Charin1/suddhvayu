@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import os
 import joblib
 from src.model import train_model, predict
@@ -50,26 +51,11 @@ else:
 
     df_filtered = df_viz[df_viz['City'] == selected_city]
 
-    fig = px.line(
-        df_filtered,
-        x='Date',
-        y=selected_pollutant,
-        title=f"Historical {selected_pollutant} Trend for {selected_city}",
-        labels={'Date': 'Date', selected_pollutant: f'{selected_pollutant} Concentration'}
-    )
-    fig.update_layout(
-        template="plotly_white",
-        xaxis=dict(rangeselector=dict(buttons=list([
-            dict(count=1, label="1m", step="month", stepmode="backward"),
-            dict(count=6, label="6m", step="month", stepmode="backward"),
-            dict(count=1, label="1y", step="year", stepmode="backward"),
-            dict(step="all")
-        ])))
-    )
+    fig = px.line(df_filtered, x='Date', y=selected_pollutant, title=f"Historical {selected_pollutant} Trend for {selected_city}")
+    fig.update_layout(template="plotly_white")
     st.plotly_chart(fig, use_container_width=True)
 
     # --- Forecasting Section ---
-    # --- FIX: Corrected city name spelling back to Ahmedabad ---
     st.header(f"🔮 PM2.5 Forecast for Ahmedabad")
 
     if selected_city != 'Ahmedabad':
@@ -88,28 +74,46 @@ else:
             if not os.path.exists(MODEL_SAVE_PATH):
                 st.info("Forecasting model not found. Please train the model using the button above.")
             else:
-                model = joblib.load(MODEL_SAVE_PATH)
+                # --- FIX: Handle both old and new model file formats ---
+                loaded_object = joblib.load(MODEL_SAVE_PATH)
                 
+                mae = None
+                if isinstance(loaded_object, dict):
+                    # New format: a dictionary containing the model and MAE
+                    model = loaded_object['model']
+                    mae = loaded_object['mae']
+                else:
+                    # Old format: just the model object
+                    model = loaded_object
+                
+                if mae:
+                    st.metric(label="Model's Average Error (MAE)", value=f"{mae:.2f} PM2.5")
+                else:
+                    st.warning("This is an old model file. Please retrain the model to see the confidence interval.")
+
                 last_data_point = df_model_features.tail(1)
-                
                 last_date = pd.to_datetime(last_data_point['Date'].iloc[0])
                 future_dates = pd.to_datetime([last_date + pd.DateOffset(days=i) for i in range(1, 8)])
                 
                 predictions = predict(model, last_data_point, future_dates)
                 
-                df_forecast = pd.DataFrame({
-                    'Date': future_dates,
-                    'Predicted PM2.5': predictions
-                })
+                df_forecast = pd.DataFrame({'Date': future_dates, 'Predicted PM2.5': predictions})
 
                 st.subheader("Next 7-Day PM2.5 Forecast")
-                forecast_fig = px.line(
-                    df_forecast,
-                    x='Date',
-                    y='Predicted PM2.5',
-                    title="Forecasted PM2.5 Levels",
-                    labels={'Predicted PM2.5': 'PM2.5 Concentration'},
-                    markers=True
-                )
-                forecast_fig.update_layout(template="plotly_white")
+
+                # Only show confidence interval if MAE is available
+                if mae:
+                    df_forecast['Upper Bound'] = df_forecast['Predicted PM2.5'] + mae
+                    df_forecast['Lower Bound'] = df_forecast['Predicted PM2.5'] - mae
+                    
+                    forecast_fig = go.Figure([
+                        go.Scatter(name='Upper Bound', x=df_forecast['Date'], y=df_forecast['Upper Bound'], mode='lines', line=dict(width=0.5, color='rgba(173, 216, 230, 0.5)')),
+                        go.Scatter(name='Lower Bound', x=df_forecast['Date'], y=df_forecast['Lower Bound'], mode='lines', line=dict(width=0.5, color='rgba(173, 216, 230, 0.5)'), fillcolor='rgba(173, 216, 230, 0.2)', fill='tonexty'),
+                        go.Scatter(name='Prediction', x=df_forecast['Date'], y=df_forecast['Predicted PM2.5'], mode='lines+markers', line=dict(color='rgb(0, 100, 80)'))
+                    ])
+                    forecast_fig.update_layout(title="Forecasted PM2.5 Levels with Confidence Interval", yaxis_title='PM2.5 Concentration', hovermode="x")
+                else:
+                    # Fallback to a simple plot if no MAE
+                    forecast_fig = px.line(df_forecast, x='Date', y='Predicted PM2.5', title="Forecasted PM2.5 Levels", markers=True)
+
                 st.plotly_chart(forecast_fig, use_container_width=True)
