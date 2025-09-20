@@ -14,19 +14,16 @@ st.set_page_config(
 )
 
 # --- File Paths ---
+RAW_DATA_PATH = os.path.join("data", "raw", "city_day.csv")
 PROCESSED_DATA_PATH = os.path.join("data", "processed", "gujarat_aqi.csv")
 MODEL_FEATURES_PATH = os.path.join("data", "processed", "gujarat_features_for_model.csv")
 MODELS_DIR = "models"
 os.makedirs(MODELS_DIR, exist_ok=True)
 MODEL_SAVE_PATH = os.path.join(MODELS_DIR, "xgboost_pm25_model.joblib")
 
-# --- Helper Function for Phase 3 ---
+# --- Helper Function for Alerts ---
 def get_aqi_alert(pm25_value):
-    """
-    Classifies a PM2.5 value into an AQI category and returns an alert message,
-    a recommendation, and a Streamlit alert type (info, success, warning, error).
-    Note: This is a simplified mapping based on common AQI breakpoints.
-    """
+    # ... (This function remains the same)
     if pm25_value <= 30:
         return "Good", "Air quality is excellent. Enjoy outdoor activities!", "success"
     elif 31 <= pm25_value <= 60:
@@ -37,50 +34,114 @@ def get_aqi_alert(pm25_value):
         return "Poor", "Everyone should reduce heavy outdoor exertion. People with heart or lung disease should avoid it entirely.", "error"
     elif 121 <= pm25_value <= 250:
         return "Very Poor", "Avoid all outdoor physical activity. Sensitive groups should remain indoors.", "error"
-    else: # pm25_value > 250
+    else:
         return "Severe", "Remain indoors and keep activity levels low. A health advisory is in effect.", "error"
 
 # --- Data Loading ---
 @st.cache_data
-def load_data(path):
+def load_data(path, date_col='Date'):
     """Loads data from a given path."""
     if not os.path.exists(path):
         return None
-    df = pd.read_csv(path, parse_dates=['Date'])
+    df = pd.read_csv(path, parse_dates=[date_col])
     return df
 
 # --- Main App Logic ---
 st.title("🌬️ ShuddhVayu: Gujarat Air Quality Dashboard")
 
-df_viz = load_data(PROCESSED_DATA_PATH)
+df_processed = load_data(PROCESSED_DATA_PATH)
 
-if df_viz is None:
+if df_processed is None:
     st.error("Processed data not found. Please run the data pipeline first by executing `python src/data_pipeline.py`")
 else:
     # --- Sidebar for User Inputs ---
     st.sidebar.header("Filters")
     
-    cities = sorted(df_viz['City'].unique())
-    selected_city = st.sidebar.selectbox("Select a City", cities, help="Choose a city to visualize its air quality trends.")
+    cities = sorted(df_processed['City'].unique())
+    selected_city = st.sidebar.selectbox("Select a City", cities)
     
-    pollutants = ['AQI', 'PM2.5', 'PM10', 'NO2', 'SO2', 'CO', 'O3']
-    selected_pollutant = st.sidebar.selectbox("Select a Pollutant", pollutants, help="Select the pollutant to display on the chart.")
+    pollutants = ['AQI', 'PM2.5', 'PM10', 'NO', 'NO2', 'NOx', 'NH3', 'CO', 'SO2', 'O3']
+    
+    # --- Main Panel with Tabs ---
+    st.header(f"Exploratory Data Analysis for {selected_city}")
+    
+    tab1, tab2, tab3 = st.tabs(["Trend Analysis", "Pollutant Distribution", "Data Quality"])
 
-    # --- Main Panel: Historical Data Visualization ---
-    st.header(f"Historical {selected_pollutant} Levels in {selected_city}")
+    # Filter data once for all tabs
+    df_city_processed = df_processed[df_processed['City'] == selected_city]
 
-    df_filtered = df_viz[df_viz['City'] == selected_city]
+    # --- Tab 1: Trend Analysis ---
+    with tab1:
+        st.subheader("Compare Historical Pollutant Trends")
+        
+        selected_pollutants = st.multiselect(
+            "Select pollutants to compare",
+            options=pollutants,
+            default=['PM2.5', 'AQI']
+        )
+        
+        if not selected_pollutants:
+            st.warning("Please select at least one pollutant to display the trend.")
+        else:
+            trend_fig = px.line(
+                df_city_processed,
+                x='Date',
+                y=selected_pollutants,
+                title=f"Historical Trends for {', '.join(selected_pollutants)} in {selected_city}"
+            )
+            trend_fig.update_layout(template="plotly_white", yaxis_title="Concentration / Index Value")
+            st.plotly_chart(trend_fig, use_container_width=True)
 
-    fig = px.line(df_filtered, x='Date', y=selected_pollutant, title=f"Historical {selected_pollutant} Trend for {selected_city}")
-    fig.update_layout(template="plotly_white")
-    st.plotly_chart(fig, use_container_width=True)
+    # --- Tab 2: Pollutant Distribution ---
+    with tab2:
+        st.subheader("Visualize Pollutant Variation")
+        
+        dist_pollutant = st.selectbox(
+            "Select a pollutant to see its distribution",
+            options=pollutants,
+            index=1 # Default to PM2.5
+        )
+        
+        df_city_processed['Year'] = df_city_processed['Date'].dt.year
+        box_fig = px.box(
+            df_city_processed,
+            x='Year',
+            y=dist_pollutant,
+            title=f"Yearly Distribution of {dist_pollutant} in {selected_city}"
+        )
+        box_fig.update_layout(template="plotly_white")
+        st.plotly_chart(box_fig, use_container_width=True)
+        st.markdown("This box plot shows the median (middle line), the interquartile range (the box), and outliers (dots). It's useful for seeing the spread and skewness of the data each year.")
 
-    # --- Forecasting Section ---
+    # --- Tab 3: Data Quality ---
+    with tab3:
+        st.subheader("Original Missing Value Analysis")
+        
+        # Load raw data to show original missing values
+        df_raw = load_data(RAW_DATA_PATH)
+        if df_raw is not None:
+            df_city_raw = df_raw[df_raw['City'] == selected_city]
+            missing_values = df_city_raw[pollutants].isnull().sum().reset_index()
+            missing_values.columns = ['Pollutant', 'Number of Missing Days']
+            
+            missing_fig = px.bar(
+                missing_values,
+                x='Pollutant',
+                y='Number of Missing Days',
+                title=f"Total Missing Data Points (Days) in Raw Data for {selected_city}"
+            )
+            st.plotly_chart(missing_fig, use_container_width=True)
+            st.markdown("This chart shows the number of days for which data was not recorded for each pollutant in the original dataset. Our data pipeline fills these gaps using time-based interpolation.")
+        else:
+            st.error("Raw data file not found. Cannot perform missing value analysis.")
+
+    # --- Forecasting Section (remains the same) ---
     st.header(f"🔮 PM2.5 Forecast for Ahmedabad")
 
     if selected_city != 'Ahmedabad':
         st.warning("Forecasting is currently only available for Ahmedabad.")
     else:
+        # ... (The entire forecasting section code is unchanged)
         df_model_features = load_data(MODEL_FEATURES_PATH)
         
         if df_model_features is None:
@@ -111,29 +172,22 @@ else:
                 
                 df_forecast = pd.DataFrame({'Date': future_dates, 'Predicted PM2.5': predictions})
 
-                # --- NEW: Display the Alert for Tomorrow ---
                 st.subheader("Health Advisory for Tomorrow")
                 next_day_forecast = df_forecast['Predicted PM2.5'].iloc[0]
                 category, recommendation, alert_type = get_aqi_alert(next_day_forecast)
 
                 with st.container(border=True):
                     st.metric(label=f"Tomorrow's Forecasted Category: {category}", value=f"{next_day_forecast:.2f} PM2.5")
-                    
-                    if alert_type == "success":
-                        st.success(f"**Recommendation:** {recommendation}")
-                    elif alert_type == "info":
-                        st.info(f"**Recommendation:** {recommendation}")
-                    elif alert_type == "warning":
-                        st.warning(f"**Recommendation:** {recommendation}")
-                    elif alert_type == "error":
-                        st.error(f"**Recommendation:** {recommendation}")
+                    if alert_type == "success": st.success(f"**Recommendation:** {recommendation}")
+                    elif alert_type == "info": st.info(f"**Recommendation:** {recommendation}")
+                    elif alert_type == "warning": st.warning(f"**Recommendation:** {recommendation}")
+                    elif alert_type == "error": st.error(f"**Recommendation:** {recommendation}")
 
                 st.subheader("Next 7-Day PM2.5 Forecast with Confidence Interval")
 
                 if mae:
                     df_forecast['Upper Bound'] = df_forecast['Predicted PM2.5'] + mae
                     df_forecast['Lower Bound'] = df_forecast['Predicted PM2.5'] - mae
-                    
                     forecast_fig = go.Figure([
                         go.Scatter(name='Upper Bound', x=df_forecast['Date'], y=df_forecast['Upper Bound'], mode='lines', line=dict(width=0.5, color='rgba(173, 216, 230, 0.5)')),
                         go.Scatter(name='Lower Bound', x=df_forecast['Date'], y=df_forecast['Lower Bound'], mode='lines', line=dict(width=0.5, color='rgba(173, 216, 230, 0.5)'), fillcolor='rgba(173, 216, 230, 0.2)', fill='tonexty'),
