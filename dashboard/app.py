@@ -104,7 +104,6 @@ with tab_forecast:
                     col2.markdown("##### Training Data Range"); col2.write(f"{start_date} to {end_date}")
                     col3.markdown("##### Last Trained"); col3.write(train_time)
 
-                # --- RE-ADDED: The dynamic performance table ---
                 st.subheader("Recent Model Performance (Last 14 Days)")
                 df_recent_history = df_model_features.tail(14).copy()
                 FEATURES = model_wrapper.get_feature_names()
@@ -124,6 +123,10 @@ with tab_forecast:
                 }).hide(axis="index")
                 st.dataframe(styler, use_container_width=True)
 
+                # --- NEW: Display the MAE score after the table ---
+                if mae:
+                    st.metric(label=f"Model's Average Error (MAE) on Validation Data", value=f"{mae:.2f}")
+
                 last_data_point = df_model_features.tail(1)
                 last_date = pd.to_datetime(last_data_point['Date'].iloc[0])
                 future_dates = pd.to_datetime([last_date + pd.DateOffset(days=i) for i in range(1, 8)])
@@ -132,7 +135,10 @@ with tab_forecast:
                 df_forecast = pd.DataFrame({'Date': future_dates, f'Predicted {selected_target}': predictions})
 
                 if selected_target == 'PM2.5':
-                    st.subheader("Health Advisory for Tomorrow")
+                    # --- NEW: Add the specific date to the advisory header ---
+                    tomorrow_date = df_forecast['Date'].iloc[0].strftime('%A, %B %d')
+                    st.subheader(f"Health Advisory for Tomorrow ({tomorrow_date})")
+                    
                     next_day_forecast_val = df_forecast[f'Predicted {selected_target}'].iloc[0]
                     category, recommendation, alert_type = get_aqi_alert(next_day_forecast_val)
                     with st.container(border=True):
@@ -153,5 +159,6 @@ with tab_forecast:
                     ])
                     forecast_fig.update_layout(title=f"Forecasted {selected_target} Levels", yaxis_title='Concentration / Index', hovermode="x")
                 else:
+                    st.warning("Retrain the model to see the confidence interval and full metadata.")
                     forecast_fig = px.line(df_forecast, x='Date', y=f'Predicted {selected_target}', title=f"Forecasted {selected_target} Levels", markers=True)
                 st.plotly_chart(forecast_fig, use_container_width=True)
