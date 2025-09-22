@@ -44,3 +44,8 @@ kiwisolver
 scipy
 watchdog
 threadpoolctl==3.6.0
+requests
+tensorflow
+keras
+sentence-transformers
+optree
