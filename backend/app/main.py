@@ -35,13 +35,13 @@ class PredictRequest(BaseModel):
     target: str = "AQI" # Added target field
 
 class HealthAnalysisRequest(BaseModel):
-    current_aqi: int
-    predicted_aqi: int
+    current_aqi: float
+    predicted_aqi: float
     dominant_pollutant: str
 
 class PolicyAnalysisRequest(BaseModel):
     city: str
-    current_aqi: int
+    current_aqi: float
     dominant_pollutant: str
 
 class FetchWeatherRequest(BaseModel):
