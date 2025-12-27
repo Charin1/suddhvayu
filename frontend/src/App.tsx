@@ -7,6 +7,7 @@ import HealthAnalysis from './components/HealthAnalysis';
 import ForecastViewer from './components/ForecastViewer';
 import ModelDashboard from './components/ModelDashboard';
 import DataConsole from './components/DataConsole';
+import PolicyPanel from './components/PolicyPanel';
 
 const App: React.FC = () => {
     const [currentView, setCurrentView] = useState<'dashboard' | 'models' | 'data'>('dashboard');
@@ -39,6 +40,9 @@ const App: React.FC = () => {
                                         <div className="lg:col-span-1">
                                             <HealthAnalysis />
                                         </div>
+                                    </div>
+                                    <div className="mt-8">
+                                        <PolicyPanel city="Ahmedabad" />
                                     </div>
                                 </>
                             )}

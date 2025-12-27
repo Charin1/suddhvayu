@@ -61,3 +61,4 @@ frontend/dist/
 frontend/.env
 coverage/
 models/
+notebooks/

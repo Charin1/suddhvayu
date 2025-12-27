@@ -16,7 +16,7 @@ from backend.app.services.data_pipeline import process_data as run_data_pipeline
 
 # ... existing code ...
 
-from backend.app.services.prompts import HEALTH_ANALYSIS_SYSTEM_PROMPT
+from backend.app.services.prompts import HEALTH_ANALYSIS_SYSTEM_PROMPT, GOVT_POLICY_SYSTEM_PROMPT
 from backend.app.services.classical_models import CLASSICAL_MODELS, train_classical_model, dynamic_predict
 from backend.app.services.dl_models import DL_MODELS, train_dl_model
 
@@ -37,6 +37,11 @@ class PredictRequest(BaseModel):
 class HealthAnalysisRequest(BaseModel):
     current_aqi: int
     predicted_aqi: int
+    dominant_pollutant: str
+
+class PolicyAnalysisRequest(BaseModel):
+    city: str
+    current_aqi: int
     dominant_pollutant: str
 
 class FetchWeatherRequest(BaseModel):
@@ -214,7 +219,7 @@ async def predict_aqi(request: PredictRequest):
         
         forecast = []
         for date, pred in zip(future_dates, predictions):
-            forecast.append({"date": date.strftime('%Y-%m-%d'), "value": round(pred, 2)})
+            forecast.append({"date": date.strftime('%Y-%m-%d'), "value": float(round(pred, 2))})
             
         # Also return recent performance if available (last 14 days)
         recent_performance = []
@@ -229,8 +234,8 @@ async def predict_aqi(request: PredictRequest):
                      recent_performance.append({
                          "date": row['Date'].strftime('%Y-%m-%d'),
                          "actual": row.get(request.target),
-                         "predicted": round(recent_preds[idx], 2)
-                     })
+                         "predicted": float(round(recent_preds[idx], 2))
+                      })
         except Exception as e:
             print(f"Warning: Could not calculate recent performance: {e}")
 
@@ -240,7 +245,7 @@ async def predict_aqi(request: PredictRequest):
             "target": request.target,
             "forecast": forecast,
             "metadata": {
-                "mae": mae,
+                "mae": float(mae) if mae is not None else None,
                 "last_trained": train_timestamp
             },
             "recent_performance": recent_performance
@@ -276,6 +281,36 @@ async def analyze_health(request: HealthAnalysisRequest):
         result = chat_completion.choices[0].message.content
         return json.loads(result)
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/v1/analyze-policy")
+async def analyze_policy(request: PolicyAnalysisRequest):
+    try:
+        prompt = GOVT_POLICY_SYSTEM_PROMPT.format(
+            city=request.city,
+            current_aqi=request.current_aqi,
+            dominant_pollutant=request.dominant_pollutant
+        )
+        
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt,
+                }
+            ],
+            model="llama-3.3-70b-versatile",
+            response_format={"type": "json_object"},
+        )
+        
+        result = chat_completion.choices[0].message.content
+        return json.loads(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/data/fetch-weather")
