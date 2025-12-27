@@ -41,9 +41,22 @@ Thumbs.db
 
 # Reports / exports
 reports/figures/*
-*.html
+
 *.pdf
 
 # Logs & temp
 logs/
 tmp/
+
+# Frontend
+node_modules/
+dist/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+coverage/
