@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { Activity, BarChart2, TrendingUp, RefreshCw, AlertCircle, CheckCircle2, FlaskConical } from 'lucide-react';
 import DataPipelineStatus from './DataPipelineStatus';
+import { useLocation } from '../context/LocationContext';
 
 // --- Types ---
 
@@ -18,8 +19,8 @@ const POLLUTANTS = ['AQI', 'PM2.5', 'PM10', 'NO2', 'CO', 'SO2', 'O3'];
 const MODELS = ['XGBoost', 'Linear Regression', 'SVR', 'Random Forest', 'ANN', 'LSTM'];
 
 const ModelDashboard: React.FC = () => {
+    const { selectedCity } = useLocation();
     const [activeTab, setActiveTab] = useState<'trends' | 'distribution' | 'training'>('training');
-    const [city] = useState('Ahmedabad');
 
     // --- Trends State ---
     const [historyData, setHistoryData] = useState<any[]>([]);
@@ -44,7 +45,7 @@ const ModelDashboard: React.FC = () => {
         const fetchHistory = async () => {
             setTrendsLoading(true);
             try {
-                const res = await fetch(`/api/v1/history/${city}`);
+                const res = await fetch(`/api/v1/history/${selectedCity}`);
                 if (res.ok) {
                     const json = await res.json();
                     setHistoryData(json.data);
@@ -55,15 +56,15 @@ const ModelDashboard: React.FC = () => {
                 setTrendsLoading(false);
             }
         };
-        fetchHistory(); // Always fetch for context
-    }, [city]);
+        fetchHistory();
+    }, [selectedCity]);
 
     // --- Fetch Distribution ---
     useEffect(() => {
         const fetchDist = async () => {
             setDistLoading(true);
             try {
-                const res = await fetch(`/api/v1/distribution/${city}?pollutant=${distPollutant}`);
+                const res = await fetch(`/api/v1/distribution/${selectedCity}?pollutant=${distPollutant}`);
                 if (res.ok) {
                     const json = await res.json();
                     const values = json.values;
@@ -86,7 +87,7 @@ const ModelDashboard: React.FC = () => {
             }
         };
         if (activeTab === 'distribution') fetchDist();
-    }, [city, distPollutant, activeTab]);
+    }, [selectedCity, distPollutant, activeTab]);
 
     // --- Forecast Actions ---
     const handleTrain = async () => {
@@ -96,7 +97,7 @@ const ModelDashboard: React.FC = () => {
             const res = await fetch('/api/v1/train', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model_type: selectedModel, city, target: forecastTarget })
+                body: JSON.stringify({ model_type: selectedModel, city: selectedCity, target: forecastTarget })
             });
             if (res.ok) {
                 setTrainStatus({ type: 'success', msg: `Training started for ${selectedModel}...` });
@@ -117,7 +118,7 @@ const ModelDashboard: React.FC = () => {
             const res = await fetch('/api/v1/predict', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ model_type: selectedModel, city, days: 7, target: forecastTarget })
+                body: JSON.stringify({ model_type: selectedModel, city: selectedCity, days: 7, target: forecastTarget })
             });
             if (res.ok) {
                 const json = await res.json();
@@ -217,8 +218,8 @@ const ModelDashboard: React.FC = () => {
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id as any)}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === tab.id
-                                    ? 'bg-primary/10 text-primary shadow-sm'
-                                    : 'text-text-muted hover:text-text-primary'
+                                ? 'bg-primary/10 text-primary shadow-sm'
+                                : 'text-text-muted hover:text-text-primary'
                                 }`}
                         >
                             <tab.icon size={16} />
@@ -259,7 +260,12 @@ const ModelDashboard: React.FC = () => {
                                             </defs>
                                             <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
                                             <XAxis dataKey="date" tick={{ fill: '#8B949E', fontSize: 10 }} tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' })} axisLine={false} tickLine={false} />
-                                            <YAxis tick={{ fill: '#8B949E', fontSize: 12 }} axisLine={false} tickLine={false} />
+                                            <YAxis
+                                                tick={{ fill: '#8B949E', fontSize: 12 }}
+                                                axisLine={false}
+                                                tickLine={false}
+                                                label={{ value: `${forecastTarget} ${forecastTarget === 'AQI' ? '(Index)' : '(µg/m³)'}`, angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 11 }}
+                                            />
                                             <Tooltip
                                                 contentStyle={{ backgroundColor: '#161B22', borderColor: '#30363d', color: '#E6EDF3', borderRadius: '8px' }}
                                             />
@@ -329,8 +335,8 @@ const ModelDashboard: React.FC = () => {
                                         }
                                     }}
                                     className={`px-3 py-1 text-xs rounded-full border transition-colors ${selectedPollutants.includes(p)
-                                            ? 'bg-secondary/10 border-secondary text-secondary'
-                                            : 'bg-dark-base border-border text-text-muted hover:border-text-muted'
+                                        ? 'bg-secondary/10 border-secondary text-secondary'
+                                        : 'bg-dark-base border-border text-text-muted hover:border-text-muted'
                                         }`}
                                 >
                                     {p}
@@ -351,7 +357,12 @@ const ModelDashboard: React.FC = () => {
                                             tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                             axisLine={false} tickLine={false}
                                         />
-                                        <YAxis tick={{ fill: '#8B949E', fontSize: 12 }} axisLine={false} tickLine={false} />
+                                        <YAxis
+                                            tick={{ fill: '#8B949E', fontSize: 12 }}
+                                            axisLine={false}
+                                            tickLine={false}
+                                            label={{ value: 'Concentration (µg/m³) / AQI', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 11 }}
+                                        />
                                         <Tooltip
                                             contentStyle={{ backgroundColor: '#161B22', borderColor: '#30363d', color: '#E6EDF3', borderRadius: '8px' }}
                                             itemStyle={{ fontSize: '13px' }}
@@ -396,8 +407,8 @@ const ModelDashboard: React.FC = () => {
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={distData}>
                                         <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
-                                        <XAxis dataKey="range" tick={{ fill: '#8B949E', fontSize: 10 }} axisLine={false} tickLine={false} />
-                                        <YAxis tick={{ fill: '#8B949E', fontSize: 12 }} axisLine={false} tickLine={false} />
+                                        <XAxis dataKey="range" tick={{ fill: '#8B949E', fontSize: 10 }} axisLine={false} tickLine={false} label={{ value: `${distPollutant} Range`, position: 'insideBottomRight', offset: -5, fill: '#8B949E', fontSize: 11 }} />
+                                        <YAxis tick={{ fill: '#8B949E', fontSize: 12 }} axisLine={false} tickLine={false} label={{ value: 'Frequency', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 11 }} />
                                         <Tooltip
                                             cursor={{ fill: 'rgba(255,255,255,0.05)' }}
                                             contentStyle={{ backgroundColor: '#161B22', borderColor: '#30363d', color: '#E6EDF3', borderRadius: '8px' }}

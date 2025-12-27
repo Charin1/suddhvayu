@@ -4,6 +4,7 @@ import {
     ResponsiveContainer, Area, AreaChart
 } from 'recharts';
 import { Activity } from 'lucide-react';
+import { useLocation } from '../context/LocationContext';
 
 interface ForecastResponse {
     forecast: { date: string; value: number }[];
@@ -11,15 +12,17 @@ interface ForecastResponse {
 }
 
 const ForecastViewer: React.FC = () => {
+    const { selectedCity } = useLocation();
     const [historyData, setHistoryData] = useState<any[]>([]);
     const [forecastData, setForecastData] = useState<ForecastResponse | null>(null);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         const fetchAll = async () => {
+            setLoading(true);
             try {
                 // 1. History
-                const histRes = await fetch('/api/v1/history/Ahmedabad');
+                const histRes = await fetch(`/api/v1/history/${selectedCity}`);
                 if (histRes.ok) {
                     const json = await histRes.json();
                     setHistoryData(json.data);
@@ -29,11 +32,13 @@ const ForecastViewer: React.FC = () => {
                 const predRes = await fetch('/api/v1/predict', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ model_type: "XGBoost", city: "Ahmedabad", days: 7, target: "PM2.5" })
+                    body: JSON.stringify({ model_type: "XGBoost", city: selectedCity, days: 7, target: "PM2.5" })
                 });
                 if (predRes.ok) {
                     const predJson = await predRes.json();
                     setForecastData(predJson);
+                } else {
+                    setForecastData(null);
                 }
 
             } catch (e) {
@@ -43,7 +48,7 @@ const ForecastViewer: React.FC = () => {
             }
         };
         fetchAll();
-    }, []);
+    }, [selectedCity]);
 
     if (loading) return <div className="h-[300px] flex items-center justify-center text-text-muted animate-pulse">Loading Intelligence...</div>;
 
@@ -53,7 +58,7 @@ const ForecastViewer: React.FC = () => {
             <div className="rounded-[20px] bg-dark-card border border-border p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-6">
                     <div>
-                        <h3 className="text-xl font-semibold text-text-primary tracking-tight">Recent Trends</h3>
+                        <h3 className="text-xl font-semibold text-text-primary tracking-tight">Recent Trends - {selectedCity}</h3>
                         <p className="text-sm text-text-muted mt-1">Air Quality History (Last 30 Days)</p>
                     </div>
                     <Activity className="text-primary opacity-50" />
@@ -67,13 +72,23 @@ const ForecastViewer: React.FC = () => {
                                 tick={{ fill: '#8B949E', fontSize: 10 }}
                                 tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                                 axisLine={false} tickLine={false}
+                                label={{ value: 'Date', position: 'insideBottomRight', offset: -5, fill: '#8B949E', fontSize: 11 }}
                             />
-                            <YAxis tick={{ fill: '#8B949E', fontSize: 12 }} axisLine={false} tickLine={false} />
+                            <YAxis
+                                tick={{ fill: '#8B949E', fontSize: 12 }}
+                                axisLine={false}
+                                tickLine={false}
+                                label={{ value: 'Concentration (µg/m³) / AQI', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 11 }}
+                            />
                             <Tooltip
                                 contentStyle={{ backgroundColor: '#161B22', borderColor: '#30363d', color: '#E6EDF3', borderRadius: '8px' }}
+                                formatter={(value: number, name: string) => {
+                                    const unit = name === 'AQI' ? ' (Index)' : ' µg/m³';
+                                    return [`${value?.toFixed(1)}${unit}`, name];
+                                }}
                             />
-                            <Line type="monotone" dataKey="AQI" stroke="#2BD42E" strokeWidth={2} dot={false} />
-                            <Line type="monotone" dataKey="PM2.5" stroke="#3b82f6" strokeWidth={2} dot={false} strokeDasharray="5 5" />
+                            <Line type="monotone" dataKey="AQI" stroke="#2BD42E" strokeWidth={2} dot={false} name="AQI" />
+                            <Line type="monotone" dataKey="PM2.5" stroke="#3b82f6" strokeWidth={2} dot={false} strokeDasharray="5 5" name="PM2.5" />
                         </LineChart>
                     </ResponsiveContainer>
                 </div>
@@ -83,7 +98,7 @@ const ForecastViewer: React.FC = () => {
             <div className="rounded-[20px] bg-dark-card border border-border p-6 shadow-sm">
                 <div className="flex items-center justify-between mb-6">
                     <div>
-                        <h3 className="text-xl font-semibold text-text-primary tracking-tight">7-Day Forecast (PM2.5)</h3>
+                        <h3 className="text-xl font-semibold text-text-primary tracking-tight">7-Day Forecast (PM2.5) - {selectedCity}</h3>
                         <p className="text-sm text-text-muted mt-1">AI-Powered Prediction (XGBoost)</p>
                     </div>
                     <div className="flex items-center gap-2 text-xs bg-dark-base px-2 py-1 rounded-lg border border-border">
@@ -103,17 +118,34 @@ const ForecastViewer: React.FC = () => {
                                     </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" stroke="#30363d" vertical={false} />
-                                <XAxis dataKey="date" tick={{ fill: '#8B949E', fontSize: 10 }} tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { weekday: 'short' })} axisLine={false} tickLine={false} />
-                                <YAxis tick={{ fill: '#8B949E', fontSize: 12 }} axisLine={false} tickLine={false} />
+                                <XAxis
+                                    dataKey="date"
+                                    tick={{ fill: '#8B949E', fontSize: 10 }}
+                                    tickFormatter={(val) => new Date(val).toLocaleDateString(undefined, { weekday: 'short' })}
+                                    axisLine={false}
+                                    tickLine={false}
+                                />
+                                <YAxis
+                                    tick={{ fill: '#8B949E', fontSize: 12 }}
+                                    axisLine={false}
+                                    tickLine={false}
+                                    label={{ value: 'PM2.5 (µg/m³)', angle: -90, position: 'insideLeft', fill: '#8B949E', fontSize: 11 }}
+                                />
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#161B22', borderColor: '#30363d', color: '#E6EDF3', borderRadius: '8px' }}
+                                    formatter={(value: number) => [`${value?.toFixed(1)} µg/m³`, 'PM2.5']}
                                 />
-                                <Area type="monotone" dataKey="value" stroke="#2BD42E" fill="url(#colorValueForecast)" />
+                                <Area type="monotone" dataKey="value" stroke="#2BD42E" fill="url(#colorValueForecast)" name="PM2.5" />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
                 ) : (
-                    <div className="h-[250px] flex items-center justify-center text-text-muted">No forecast data</div>
+                    <div className="h-[250px] flex items-center justify-center text-text-muted">
+                        <div className="text-center">
+                            <p>No forecast data available for {selectedCity}</p>
+                            <p className="text-xs mt-1">Train a model in Model Lab first</p>
+                        </div>
+                    </div>
                 )}
             </div>
         </div>

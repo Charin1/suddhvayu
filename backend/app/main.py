@@ -11,6 +11,10 @@ import numpy as np
 import joblib
 from datetime import datetime, timedelta
 import subprocess
+import sys
+from backend.app.services.data_pipeline import process_data as run_data_pipeline
+
+# ... existing code ...
 
 from backend.app.services.prompts import HEALTH_ANALYSIS_SYSTEM_PROMPT
 from backend.app.services.classical_models import CLASSICAL_MODELS, train_classical_model, dynamic_predict
@@ -35,6 +39,14 @@ class HealthAnalysisRequest(BaseModel):
     predicted_aqi: int
     dominant_pollutant: str
 
+class FetchWeatherRequest(BaseModel):
+    city: str
+    start_date: str
+    end_date: str
+
+class ProcessFeaturesRequest(BaseModel):
+    city: str = None
+
 # Initialize FastAPI app
 app = FastAPI(
     title="ShuddhVayu API",
@@ -54,74 +66,38 @@ MODELS_DIR = os.path.join("models")
 async def health_check():
     return {"status": "ok", "message": "Service is healthy"}
 
-@app.get("/api/v1/system/status")
-async def get_system_status():
-    """
-    Returns the status (existence, modification time) of critical data files.
-    """
-    def get_file_info(path):
-        if os.path.exists(path):
-            return {
-                "exists": True,
-                "modified": datetime.fromtimestamp(os.path.getmtime(path)).strftime('%Y-%m-%d %H:%M:%S'),
-                "size_kb": round(os.path.getsize(path) / 1024, 2)
-            }
-        return {"exists": False, "modified": None, "size_kb": 0}
-
-    return {
-        "raw_data": {
-            "city_day.csv": get_file_info(os.path.join(RAW_DATA_DIR, "city_day.csv")),
-            "ahmedabad_weather.csv": get_file_info(os.path.join(RAW_DATA_DIR, "ahmedabad_weather.csv"))
-        },
-        "processed_data": {
-            "gujarat_aqi.csv": get_file_info(os.path.join(DATA_DIR, "gujarat_aqi.csv")),
-            "gujarat_features_for_model.csv": get_file_info(os.path.join(DATA_DIR, "gujarat_features_for_model.csv"))
-        }
-    }
-
-def run_script_task(script_name: str):
-    try:
-        # Assuming script is in root/scripts/
-        script_path = os.path.join("scripts", script_name)
-        if not os.path.exists(script_path):
-            print(f"Script not found: {script_path}")
-            return
-        
-        print(f"Executing {script_name}...")
-        # running in the same python environment
-        subprocess.run(["python", script_path], check=True)
-        print(f"Finished executing {script_name}")
-    except subprocess.CalledProcessError as e:
-        print(f"Error executing script: {e}")
-    except Exception as e:
-        print(f"Unexpected error: {e}")
-
-@app.post("/api/v1/data/fetch-weather")
-async def fetch_weather(background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_script_task, "fetch_weather_data.py")
-    return {"status": "started", "message": "Weather data fetch started in background"}
 
 @app.get("/api/v1/history/{city}")
 async def get_history(city: str):
     try:
-        file_path = os.path.join(DATA_DIR, "gujarat_aqi.csv")
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Data file not found")
+        # Try city-specific file first (new format)
+        city_lower = city.lower()
+        specific_file = os.path.join(DATA_DIR, f"{city_lower}_aqi_cleaned.csv")
+        legacy_file = os.path.join(DATA_DIR, "gujarat_aqi.csv")
         
-        df = pd.read_csv(file_path)
-        # Filter by city (assuming case-insensitive match for robustness)
-        df_city = df[df['City'].str.lower() == city.lower()]
+        df = None
+        if os.path.exists(specific_file):
+            df = pd.read_csv(specific_file)
+            # Ensure filtering if multiple cities somehow exist
+            if 'City' in df.columns:
+                df = df[df['City'].str.lower() == city_lower]
+        elif os.path.exists(legacy_file):
+            df_all = pd.read_csv(legacy_file)
+            df = df_all[df_all['City'].str.lower() == city_lower]
         
-        if df_city.empty:
-             raise HTTPException(status_code=404, detail=f"No data found for city: {city}")
+        if df is None or df.empty:
+             # Just return empty list instead of 404/500 to allow UI to render empty state
+             return {"city": city, "data": []}
 
         # Convert to list of dicts for JSON response
         # Returning last 30 days to avoid huge payload
         # Replace NaN with None for valid JSON serialization
-        data = df_city.tail(30).replace({np.nan: None}).to_dict(orient="records")
+        data = df.tail(30).replace({np.nan: None}).to_dict(orient="records")
         return {"city": city, "data": data}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error fetching history for {city}: {e}")
+        # Return empty data structure on error preventing frontend crash
+        return {"city": city, "data": []}
 
 @app.get("/api/v1/distribution/{city}")
 async def get_distribution(city: str, pollutant: str = "AQI"):
@@ -171,7 +147,7 @@ def run_training_pipeline(model_type: str, city: str, target: str):
             print(f"Error: Invalid model type {model_type}")
             return
 
-        feature_file = os.path.join(DATA_DIR, "gujarat_features_for_model.csv")
+        feature_file = os.path.join(DATA_DIR, f"{city.lower()}_features.csv")
         if not os.path.exists(feature_file):
             print(f"Error: Feature file not found at {feature_file}")
             return
@@ -191,9 +167,15 @@ def run_training_pipeline(model_type: str, city: str, target: str):
         print(f"Training failed: {str(e)}")
 
 @app.post("/api/v1/train")
-async def train_model(request: TrainRequest, background_tasks: BackgroundTasks):
-    background_tasks.add_task(run_training_pipeline, request.model_type, request.city, request.target)
-    return {"status": "training_started", "model": request.model_type, "city": request.city, "target": request.target}
+async def train_model(request: TrainRequest):
+    try:
+        # Run synchronously to ensure model is ready before prediction
+        print(f"DEBUG: Starting synchronous training for {request.model_type} on {request.city}")
+        run_training_pipeline(request.model_type, request.city, request.target)
+        return {"status": "training_completed", "model": request.model_type, "city": request.city, "target": request.target}
+    except Exception as e:
+        print(f"ERROR: Training endpoint failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/predict")
 async def predict_aqi(request: PredictRequest):
@@ -218,7 +200,7 @@ async def predict_aqi(request: PredictRequest):
         train_timestamp = model_data.get('train_timestamp')
         
         # Load latest data for prediction context
-        feature_file = os.path.join(DATA_DIR, "gujarat_features_for_model.csv")
+        feature_file = os.path.join(DATA_DIR, f"{request.city.lower()}_features.csv")
         if not os.path.exists(feature_file):
              raise HTTPException(status_code=500, detail="Feature data file unavailable")
              
@@ -264,7 +246,11 @@ async def predict_aqi(request: PredictRequest):
             "recent_performance": recent_performance
         }
         
+    except HTTPException as he:
+        raise he
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/analyze-health")
@@ -291,6 +277,88 @@ async def analyze_health(request: HealthAnalysisRequest):
         return json.loads(result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/data/fetch-weather")
+async def fetch_weather_endpoint(request: FetchWeatherRequest, background_tasks: BackgroundTasks):
+    """
+    Triggers the fetch_weather_data.py script in the background with dynamic arguments.
+    """
+    print(f"DEBUG: Received fetch request for city={request.city}, start={request.start_date}, end={request.end_date}")
+    
+    def run_script(city, start, end):
+        script_path = os.path.join("scripts", "fetch_weather_data.py")
+        abs_script_path = os.path.abspath(script_path)
+        venv_python = sys.executable
+        
+        print(f"DEBUG: Starting background task for {city}")
+        print(f"DEBUG: Using Python: {venv_python}")
+        print(f"DEBUG: Script Path: {abs_script_path}")
+        
+        if not os.path.exists(abs_script_path):
+             print(f"ERROR: Script not found at {abs_script_path}")
+             return
+
+        cmd = [
+            venv_python, abs_script_path,
+            "--city", city,
+            "--start_date", start,
+            "--end_date", end
+        ]
+        
+        print(f"DEBUG: Executing command: {' '.join(cmd)}")
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            print(f"DEBUG: Subprocess return code: {result.returncode}")
+            print("DEBUG: STDOUT:", result.stdout)
+            print("DEBUG: STDERR:", result.stderr)
+        except Exception as e:
+            print(f"ERROR: Subprocess failed with exception: {e}")
+
+    background_tasks.add_task(run_script, request.city, request.start_date, request.end_date)
+    return {"status": "started", "message": f"Weather data fetch for {request.city} initiated in background."}
+
+@app.post("/api/v1/data/process-features")
+async def process_features_endpoint(request: ProcessFeaturesRequest, background_tasks: BackgroundTasks):
+    """
+    Triggers the feature engineering pipeline (data_pipeline.py).
+    """
+    def task_wrapper(city):
+        print(f"Starting feature processing for {city}...")
+        try:
+             run_data_pipeline(city=city)
+             print(f"Feature processing for {city} completed.")
+        except Exception as e:
+             print(f"Feature processing failed: {e}")
+
+    background_tasks.add_task(task_wrapper, request.city)
+    return {"status": "started", "message": f"Feature engineering for {request.city or 'ALL'} initiated in background."}
+
+@app.get("/api/v1/system/status")
+async def get_system_status():
+    status = []
+    
+    # helper to process a directory
+    def scan_dir(directory, category):
+        if not os.path.exists(directory):
+            return
+        for filename in os.listdir(directory):
+            if filename.endswith(".csv"):
+                path = os.path.join(directory, filename)
+                info = {
+                    "key": filename,
+                    "category": category, # "raw" or "processed"
+                    "exists": True,
+                    "path": path,
+                    "size_bytes": os.path.getsize(path),
+                    "last_modified": datetime.fromtimestamp(os.path.getmtime(path)).isoformat()
+                }
+                status.append(info)
+
+    scan_dir(RAW_DATA_DIR, "raw")
+    scan_dir(DATA_DIR, "processed")
+        
+    return status
 
 if __name__ == "__main__":
     uvicorn.run("backend.app.main:app", host="0.0.0.0", port=8000, reload=True)

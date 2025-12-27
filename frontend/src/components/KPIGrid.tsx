@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, Wind, TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
+import { useLocation } from '../context/LocationContext';
 
 interface KPICardProps {
     title: string;
@@ -43,6 +44,7 @@ const KPICard: React.FC<KPICardProps> = ({ title, value, subtitle, icon, color =
 };
 
 const KPIGrid: React.FC = () => {
+    const { selectedCity } = useLocation();
     const [stats, setStats] = useState({
         aqi: '...',
         aqiSubtitle: 'Loading...',
@@ -57,7 +59,7 @@ const KPIGrid: React.FC = () => {
     useEffect(() => {
         const fetchData = async () => {
             try {
-                const res = await fetch('/api/v1/history/Ahmedabad');
+                const res = await fetch(`/api/v1/history/${selectedCity}`);
                 if (res.ok) {
                     const json = await res.json();
                     const data = json.data;
@@ -80,8 +82,8 @@ const KPIGrid: React.FC = () => {
                         const trendValue = `${change > 0 ? '+' : ''}${pctChange}%`;
                         const trendDirection = change > 0 ? 'up' : change < 0 ? 'down' : 'neutral';
 
-                        // Dominant Pollutant (Simple heuristic: max of sub-indices, or just PM2.5 for now as we don't have sub-indices computed)
-                        const pollutant = "PM 2.5"; // Usually the driver
+                        // Dominant Pollutant
+                        const pollutant = "PM 2.5";
 
                         setStats({
                             aqi: Math.round(aqi).toString(),
@@ -100,7 +102,7 @@ const KPIGrid: React.FC = () => {
             }
         };
         fetchData();
-    }, []);
+    }, [selectedCity]);
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 w-full">

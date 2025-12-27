@@ -11,6 +11,10 @@ export default {
                     DEFAULT: '#2BD42E', // Primary / Green
                     soft: '#55DD58',    // Secondary / Green Soft
                 },
+                secondary: {
+                    DEFAULT: '#3B82F6', // Secondary / Blue
+                    foreground: '#FFFFFF',
+                },
                 aqi: {
                     good: '#2BD42E',
                     moderate: '#55DD58',

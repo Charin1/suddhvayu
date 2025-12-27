@@ -36,7 +36,11 @@ CLASSICAL_MODELS = {
 # --- FIX: Renamed function to be specific ---
 def train_classical_model(df, target_pollutant, model_wrapper, model_name, save_path):
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    FEATURES = [col for col in df.columns if col not in [target_pollutant, 'Date', 'City', 'AQI_Bucket']]
+    FLAGS = [target_pollutant, 'Date', 'City', 'AQI_Bucket']
+    if target_pollutant not in df.columns:
+        raise ValueError(f"Target '{target_pollutant}' not found in dataset. Ensure AQI data was fetched and processed correctly.")
+        
+    FEATURES = [col for col in df.columns if col not in FLAGS]
     X = df[FEATURES]
     y = df[target_pollutant]
     split_index = int(len(X) * 0.9)

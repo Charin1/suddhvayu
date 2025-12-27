@@ -1,30 +1,38 @@
 import React, { useEffect, useState } from 'react';
-import { Database, FileText, CheckCircle2, XCircle } from 'lucide-react';
+import { Database, FileText, CheckCircle2, XCircle, Clock, Save } from 'lucide-react';
 
 interface FileInfo {
+    key: string;
+    category: 'raw' | 'processed';
     exists: boolean;
-    modified: string | null;
-    size_kb: number;
+    path: string;
+    size_bytes: number;
+    last_modified: string | null;
 }
 
-interface SystemStatus {
-    raw_data: Record<string, FileInfo>;
-    processed_data: Record<string, FileInfo>;
+interface DataPipelineStatusProps {
+    searchTerm?: string;
 }
 
-const DataPipelineStatus: React.FC = () => {
-    const [status, setStatus] = useState<SystemStatus | null>(null);
+const DataPipelineStatus: React.FC<DataPipelineStatusProps> = ({ searchTerm = "" }) => {
+    const [files, setFiles] = useState<FileInfo[]>([]);
     const [loading, setLoading] = useState(true);
 
     const fetchStatus = async () => {
-        setLoading(true);
         try {
             const res = await fetch('/api/v1/system/status');
             if (res.ok) {
-                setStatus(await res.json());
+                const data = await res.json();
+                // sort by last modified descending
+                data.sort((a: FileInfo, b: FileInfo) => {
+                    if (!a.last_modified) return 1;
+                    if (!b.last_modified) return -1;
+                    return new Date(b.last_modified).getTime() - new Date(a.last_modified).getTime();
+                });
+                setFiles(data);
             }
         } catch (e) {
-            console.error("Status fetch failed", e);
+            console.error("Failed to fetch system status", e);
         } finally {
             setLoading(false);
         }
@@ -32,70 +40,80 @@ const DataPipelineStatus: React.FC = () => {
 
     useEffect(() => {
         fetchStatus();
-        const interval = setInterval(fetchStatus, 30000); // Poll every 30s
+        const interval = setInterval(fetchStatus, 5000); // Poll every 5s
         return () => clearInterval(interval);
     }, []);
 
-    const StatusRow = ({ name, info }: { name: string, info: FileInfo }) => (
-        <div className="flex items-center justify-between py-3 border-b border-border last:border-0 hover:bg-white/5 px-2 rounded-lg transition-colors">
-            <div className="flex items-center gap-3">
-                <FileText className="text-text-muted w-4 h-4" />
-                <div>
-                    <div className="text-sm font-medium text-text-primary">{name}</div>
-                    <div className="text-xs text-text-muted">
-                        {info.exists ? `${info.size_kb} KB` : 'Missing'}
+    const filteredFiles = files.filter(f => f.key.toLowerCase().includes(searchTerm.toLowerCase()));
+
+    const formatBytes = (bytes: number) => {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    };
+
+    const formatDate = (dateStr: string | null) => {
+        if (!dateStr) return 'Never';
+        return new Date(dateStr).toLocaleString();
+    };
+
+    const renderFileRow = (file: FileInfo) => (
+        <div key={file.path} className="flex items-center justify-between p-3 bg-dark-base rounded-xl border border-border group hover:border-primary/30 transition-colors gap-3">
+            <div className="flex items-center gap-3 min-w-0 flex-1">
+                <div className={`p-2 rounded-lg flex-shrink-0 ${file.exists ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'}`}>
+                    {file.exists ? <FileText size={16} /> : <XCircle size={16} />}
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="font-medium text-text-primary text-sm flex items-center gap-2">
+                        <span className="truncate" title={file.key}>{file.key}</span>
+                        {file.category === 'processed' && <span className="flex-shrink-0 text-[10px] bg-primary/20 text-primary px-1.5 py-0.5 rounded">PROCESSED</span>}
+                    </div>
+                    <div className="text-xs text-text-muted flex items-center gap-2 mt-0.5">
+                        <span className="flex items-center gap-1 flex-shrink-0"><Save size={10} /> {formatBytes(file.size_bytes)}</span>
+                        <span>•</span>
+                        <span className="flex items-center gap-1 truncate"><Clock size={10} /> {formatDate(file.last_modified)}</span>
                     </div>
                 </div>
             </div>
-            <div className="flex flex-col items-end">
-                {info.exists ? (
-                    <div className="flex items-center gap-1.5 text-aqi-good text-xs font-semibold bg-aqi-good/10 px-2 py-1 rounded-full border border-aqi-good/20">
+            <div className="flex items-center gap-2 flex-shrink-0">
+                {file.exists ?
+                    <div className="flex items-center gap-1 text-green-500 text-xs font-medium bg-green-500/10 px-2 py-1 rounded-full">
                         <CheckCircle2 size={12} /> Ready
                     </div>
-                ) : (
-                    <div className="flex items-center gap-1.5 text-aqi-danger text-xs font-semibold bg-aqi-danger/10 px-2 py-1 rounded-full border border-aqi-danger/20">
-                        <XCircle size={12} /> Missing
+                    :
+                    <div className="flex items-center gap-1 text-red-500 text-xs font-medium bg-red-500/10 px-2 py-1 rounded-full">
+                        Missing
                     </div>
-                )}
-                <div className="text-[10px] text-text-muted mt-1">{info.modified || '-'}</div>
+                }
             </div>
         </div>
     );
 
-    if (loading && !status) return <div className="text-sm text-text-muted animate-pulse">Checking pipeline health...</div>;
-
     return (
         <div className="rounded-[20px] bg-dark-card border border-border p-6 shadow-sm h-full">
             <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-secondary/10 rounded-lg text-secondary border border-secondary/20">
+                <div className="p-2 bg-aqi-good/10 rounded-lg text-aqi-good border border-aqi-good/20">
                     <Database size={20} />
                 </div>
                 <div>
                     <h3 className="text-lg font-semibold text-text-primary">Data Pipeline Overview</h3>
-                    <p className="text-xs text-text-muted">Monitor raw & processed asset health</p>
+                    <p className="text-xs text-text-muted">Real-time status of raw & processed assets</p>
                 </div>
             </div>
 
-            {status && (
-                <div className="space-y-6">
-                    <div>
-                        <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 pl-2">Raw Ingestion</h4>
-                        <div className="space-y-1">
-                            {Object.entries(status.raw_data).map(([name, info]) => (
-                                <StatusRow key={name} name={name} info={info} />
-                            ))}
-                        </div>
+            <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-border">
+                {loading ? (
+                    <div className="text-center text-text-muted text-xs py-4">Loading file status...</div>
+                ) : filteredFiles.length > 0 ? (
+                    filteredFiles.map(renderFileRow)
+                ) : (
+                    <div className="text-center text-text-muted text-xs py-4">
+                        {searchTerm ? "No matching files found." : "No data files, run fetch first."}
                     </div>
-                    <div>
-                        <h4 className="text-xs font-semibold text-text-muted uppercase tracking-wider mb-2 pl-2">Processed Features</h4>
-                        <div className="space-y-1">
-                            {Object.entries(status.processed_data).map(([name, info]) => (
-                                <StatusRow key={name} name={name} info={info} />
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
+                )}
+            </div>
         </div>
     );
 };
