@@ -1,166 +1,338 @@
 # ShuddhVayu - Technical Documentation & Developer Manual
 
-This document provides a comprehensive deep-dive into the ShuddhVayu codebase. It is intended for developers who wish to understand the internal workings, extend the forecasting engine, or modify the dashboard.
+This document provides a comprehensive deep-dive into the ShuddhVayu codebase. It is intended for developers who wish to understand the internal workings, extend the forecasting engine, or modify the application.
 
 ---
 
 ## 1. System Architecture
 
-The application follows a modular architecture separating data processing, model logic, and the presentation layer.
+The application follows a modern full-stack architecture with a React frontend, FastAPI backend, and modular ML pipeline.
 
 ```mermaid
 graph TD
-    RawData[Raw Data (CSV)] --> Pipeline[src/data_pipeline.py]
-    Pipeline --> ProcessedData[Processed Data & Features]
-    
-    subgraph "Model Layer (src/)"
-        ProcessedData --> Classical[classical_models.py]
-        ProcessedData --> DL[dl_models.py]
-        Classical --> Joblib[Saved Models (.joblib)]
-        DL --> Joblib
+    subgraph "Data Sources"
+        OpenAQ[OpenAQ API v3]
+        OpenMeteo[Open-Meteo Archive]
     end
     
-    subgraph "Dashboard Layer (dashboard/)"
-        ProcessedData --> EDA[eda.py]
-        Joblib --> App[app.py]
-        App --> UserUI[Streamlit UI]
+    subgraph "Data Layer"
+        OpenAQ --> FetchScript[fetch_weather_data.py]
+        OpenMeteo --> FetchScript
+        FetchScript --> RawData[data/raw/*.csv]
+        RawData --> Pipeline[data_pipeline.py]
+        Pipeline --> ProcessedData[data/processed/*.csv]
+    end
+    
+    subgraph "Backend (FastAPI)"
+        ProcessedData --> Classical[classical_models.py]
+        ProcessedData --> DL[dl_models.py]
+        Classical --> Models[Saved Models]
+        DL --> Models
+        API[main.py] --> Classical
+        API --> DL
+        API --> Pipeline
+    end
+    
+    subgraph "Frontend (React)"
+        API --> ReactApp[React Components]
+        ReactApp --> UI[User Interface]
     end
 ```
 
 ---
 
-## 2. Module Reference
+## 2. Data Pipeline (`backend/app/services/data_pipeline.py`)
 
-### 2.1 Data Pipeline (`src/data_pipeline.py`)
+### Overview
 
-This module handles the Extract-Transform-Load (ETL) process. It is responsible for cleaning raw data and engineering features for the machine learning models.
+The data pipeline handles ETL (Extract-Transform-Load), data cleaning, and feature engineering.
 
-#### Functions
+### Key Functions
 
-**`process_data()`**
-*   **Purpose**: Main execution function triggered when running the script.
-*   **Workflow**:
-    1.  **Ingestion**: Reads `data/raw/city_day.csv` and `data/raw/ahmedabad_weather.csv`.
-    2.  **Filtering**: Selects data only for specific Gujarat cities (currently 'Ahmedabad' and 'Gandhinagar').
-    3.  **Imputation (Stage 1)**: Fills missing pollutant values using time-based interpolation per city.
-    4.  **Weather Merge**: Merges external weather data for Ahmedabad (Temperature, Humidity, Wind Speed, etc.).
-    5.  **Feature Engineering**:
-        *   **Date Features**: Extracts day of week, month, year, day of year.
-        *   **Lag Features**: Creates lags 1 through 7 for every target pollutant (e.g., `PM2.5_lag_1`).
-        *   **Rolling Stats**: Calculates 7-day rolling mean and standard deviation.
-    6.  **Cleaning (Stage 2)**: Drops rows containing NaNs in essential engineered features to ensure model stability.
-    7.  **Output**: Saves `gujarat_aqi.csv` (for EDA) and `gujarat_features_for_model.csv` (for training).
+#### `process_data(city: str)`
 
----
+Main pipeline function that:
 
-### 2.2 Classical Models (`src/classical_models.py`)
+1. **Data Loading**: Loads city-specific files (`{city}_aqi.csv`, `{city}_weather.csv`) or combined file
+2. **Duplicate Column Consolidation**: Merges sensor duplicates (e.g., `PM2.5` + `PM2.5.1`)
+3. **Missing Value Imputation**: Linear interpolation with bidirectional fill
+4. **AQI Calculation**: Computes AQI using CPCB breakpoints
+5. **Feature Engineering**: Date features, lag features (1-7 days), rolling statistics
+6. **Output**: Saves cleaned data and feature-engineered dataset
 
-Handles traditional machine learning algorithms using Scikit-Learn and XGBoost.
+#### `consolidate_duplicate_columns(df)`
 
-#### Classes
+Handles pandas-renamed duplicate columns:
+```python
+# When CSV has: PM2.5,PM2.5 (duplicate headers)
+# Pandas creates: PM2.5, PM2.5.1
+# This function merges them by taking mean of non-null values
+```
 
-**`BaseModel`**
-*   **Description**: A generic wrapper for Scikit-Learn regressors.
-*   **`__init__(self, model)`**: Initializes with a base sklearn estimator.
-*   **`train(self, X_train, y_train, X_val=None, y_val=None)`**: Fits the pipeline (Imputer + Regressor). validation data is accepted for API consistency but not used by standard sklearn `fit`.
-*   **`predict(self, X)`**: Returns predictions.
+#### `get_aqi_cpcb(row)`
 
-**`XGBoostModel`**
-*   **Description**: A specialized wrapper for XGBoost to utilize early stopping.
-*   **`__init__(self)`**: Configures `XGBRegressor` with `n_estimators=1000`, `learning_rate=0.05`, and `early_stopping_rounds=50`.
-*   **`train(...)`**: Fits the model using the validation set (`eval_set`) to stop training when performance plateaus.
+Calculates AQI using Central Pollution Control Board (CPCB) standards:
 
-#### Global Variables
-*   **`CLASSICAL_MODELS`**: Dictionary registry of available models: `Linear Regression`, `SVR`, `XGBoost`.
+| Pollutant | Units | AQI Breakpoints |
+|-----------|-------|-----------------|
+| PM2.5 | µg/m³ | 0-30 (Good), 31-60 (Satisfactory), 61-90 (Moderate), 91-120 (Poor) |
+| PM10 | µg/m³ | 0-50 (Good), 51-100 (Satisfactory), 101-250 (Moderate) |
+| NO2 | µg/m³ | 0-40 (Good), 41-80 (Satisfactory), 81-180 (Moderate) |
+| CO | mg/m³ | 0-1 (Good), 1.1-2 (Satisfactory), 2.1-10 (Moderate) |
+| SO2 | µg/m³ | 0-40 (Good), 41-80 (Satisfactory), 81-380 (Moderate) |
+| O3 | µg/m³ | 0-50 (Good), 51-100 (Satisfactory), 101-168 (Moderate) |
 
-#### Helper Functions
+**Final AQI = max(all sub-indices)**
 
-**`train_classical_model(df, target_pollutant, model_wrapper, model_name, save_path)`**
-*   **Purpose**: Orchestrates the training process.
-*   **Steps**:
-    1.  Splits data (90% train, 10% validation).
-    2.  Trains the model wrapper.
-    3.  Calculates Mean Absolute Error (MAE).
-    4.  Saves a dictionary containing the model object, MAE, and training metadata to disk using `joblib`.
+### Data Quality Handling
 
-**`dynamic_predict(model_wrapper, last_known_data, future_dates, target_pollutant)`**
-*   **Purpose**: Performs recursive multi-step forecasting.
-*   **Logic**:
-    *   Predicts day T+1.
-    *   Updates the feature set for day T+2 by treating the T+1 prediction as a "lagged" actual value.
-    *   Recalculates rolling means/stds for the new window.
-    *   Repeats for T+3... T+7.
+| Issue | Solution |
+|-------|----------|
+| Duplicate sensor columns | `consolidate_duplicate_columns()` merges by mean |
+| CO unit mismatch | Auto-convert µg/m³ → mg/m³ if value > 100 |
+| Missing pollutant values | Linear interpolation, bidirectional fill |
+| Missing AQI | Calculate from pollutants using CPCB formula |
 
 ---
 
-### 2.3 Deep Learning Models (`src/dl_models.py`)
+## 3. Data Fetching (`scripts/fetch_weather_data.py`)
 
-Handles Neural Network architectures using Keras/TensorFlow.
+### OpenAQ API v3 Integration
 
-#### Classes
+Fetches pollutant data from nearby monitoring stations:
 
-**`ANNModel`**
-*   **Description**: A standard Feed-Forward Artificial Neural Network.
-*   **Architecture**:
-    *   Input Layer -> Dense(64, relu) -> Dense(32, relu) -> Output(1)
-*   **Preprocessing**: built-in `SimpleImputer` (median) and `MinMaxScaler`.
-*   **`train(...)`**: Fits scaler on training data, then trains the network.
-*   **`predict(...)`**: Imputes/Scales input -> Predicts -> Inverse Scales output.
+```python
+# Workflow:
+# 1. Find locations near city coordinates (25km radius)
+# 2. Get sensors for the location
+# 3. Fetch daily historical data for each sensor
+# 4. Merge by date, standardize column names
+```
 
-**`LSTMModel`**
-*   **Inheritance**: Inherits from `ANNModel`.
-*   **Description**: Long Short-Term Memory network for sequence data.
-*   **Architecture**:
-    *   LSTM(50, relu) -> Dense(25, relu) -> Output(1)
-*   **Special Logic**: Reshapes input data into 3D array `(samples, time_steps, features)` required by LSTM layers.
+#### Pollutant Name Mapping
 
-#### Global Variables
-*   **`DL_MODELS`**: Dictionary registry: `ANN`, `LSTM`.
+```python
+PARAM_MAP = {
+    "pm25": "PM2.5", "pm2.5": "PM2.5",
+    "pm10": "PM10",
+    "no2": "NO2",
+    "so2": "SO2",
+    "co": "CO",
+    "o3": "O3",
+    "no": "NO"
+}
+```
 
----
+### Open-Meteo Weather API
 
-### 2.4 Visualization Modules (`src/eda.py` & `src/visualize.py`)
-
-Helper functions to generate Plotly figures for the dashboard.
-
-*   **`plot_trends`**: Creates multi-line time-series charts. Used in EDA tab.
-*   **`plot_distribution`**: Creates yearly box plots to visualize statistical spread.
-*   **`plot_missing_values`**: Visualizes data gaps.
-*   **`src/visualize.py`**: Contains `plot_monthly_heatmap` using Seaborn (currently secondary/unused in main UI).
-
----
-
-## 3. Dashboard Application (`dashboard/app.py`)
-
-The Streamlit entry point.
-
-### Key Logic Flow
-
-1.  **Initialization**: Sets page config, constants, and creates `models/` directory if missing.
-2.  **`load_data(path)`**: Cached function to load CSVs efficiently.
-3.  **Tab Structure**:
-    *   **Tab 1 (EDA)**:
-        *   Filters data by City.
-        *   Calls functions from `src.eda` based on user selection.
-    *   **Tab 2 (Forecast)**:
-        *   **Inputs**: User selects Target Pollutant (e.g., PM2.5) and Algorithm.
-        *   **Training Trigger**: User clicks "Train/Retrain". The app routes the request to either `train_classical_model` or `train_dl_model` based on the algorithm type.
-        *   **Inference**: Loads the saved `.joblib` model. Displays metadata (Training timestamp, MAE).
-        *   **Forecasting**: Uses `dynamic_predict` to generate the next 7 days of values.
-        *   **Health Advisory**: Custom logic (`get_aqi_alert`) maps predicted PM2.5 values to health categories (Good, Moderate, Poor, etc.).
+Free historical weather data:
+- `temperature_2m_max`, `temperature_2m_min`, `temperature_2m_mean`
+- `precipitation_sum`, `rain_sum`
+- `wind_speed_10m_max`, `wind_direction_10m_dominant`
+- `shortwave_radiation_sum`
 
 ---
 
-## 4. Extending the Project
+## 4. ML Models
+
+### Classical Models (`backend/app/services/classical_models.py`)
+
+| Model | Description | Parameters |
+|-------|-------------|------------|
+| Linear Regression | Baseline model | Default sklearn params |
+| SVR | Support Vector Regressor | RBF kernel |
+| XGBoost | Gradient Boosting | n_estimators=1000, learning_rate=0.05, early_stopping=50 |
+
+#### Training Workflow
+
+```python
+def train_classical_model(df, target_pollutant, model_wrapper, model_name, save_path):
+    # 1. Split data (90% train, 10% validation)
+    # 2. Train model wrapper
+    # 3. Calculate MAE
+    # 4. Save model + metadata using joblib
+```
+
+#### Dynamic Prediction (Multi-Step Forecasting)
+
+```python
+def dynamic_predict(model_wrapper, last_known_data, future_dates, target_pollutant):
+    # Recursive forecasting:
+    # - Predict day T+1
+    # - Use T+1 prediction to update lag features
+    # - Predict T+2... T+7
+```
+
+### Deep Learning Models (`backend/app/services/dl_models.py`)
+
+| Model | Architecture |
+|-------|--------------|
+| ANN | Dense(64, relu) → Dense(32, relu) → Output(1) |
+| LSTM | LSTM(50, relu) → Dense(25, relu) → Output(1) |
+
+---
+
+## 5. API Reference (`backend/app/main.py`)
+
+### Core Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `GET /health` | GET | Health check |
+| `GET /api/cities` | GET | List available cities |
+| `GET /api/trends/{city}` | GET | Historical pollutant trends |
+| `GET /api/distribution/{city}` | GET | Pollutant distribution data |
+
+### Data Operations Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `POST /api/fetch-weather` | POST | Fetch external data (weather + AQI) |
+| `POST /api/process-features` | POST | Run data pipeline for city |
+
+### Model Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `POST /api/train` | POST | Train ML model |
+| `POST /api/predict` | POST | Generate forecast |
+
+---
+
+## 6. Frontend Structure (`frontend/`)
+
+### Key Components
+
+| Component | Purpose |
+|-----------|---------|
+| `DataConsole.tsx` | Interactive data management interface for fetching/processing |
+| `DataPipelineStatus.tsx` | Real-time monitoring of pipeline execution |
+| `ForecastViewer.tsx` | Interactive 7-day forecast visualization |
+| `Header.tsx` | Navigation and app branding |
+| `HealthAnalysis.tsx` | LLM-powered health recommendations display |
+| `KPIGrid.tsx` | Key performance indicators dashboard |
+| `ModelDashboard.tsx` | Model training, status, and comparison |
+| `PolicyPanel.tsx` | Government policy recommendations UI |
+| `Sidebar.tsx` | Navigation menu |
+
+---
+
+## 7. LLM-Powered Features (`backend/app/services/prompts.py`)
+
+### Health Analysis (Groq API)
+
+Uses Llama 3.3 to generate personalized health recommendations based on AQI data.
+
+**Input:**
+- Current AQI value
+- Predicted AQI (next 24h)
+- Dominant pollutant
+
+**Output (JSON):**
+```json
+{
+  "summary": "Air quality status description",
+  "risk_level": "Low/Moderate/High/Severe",
+  "recommendations": {
+    "children": "...",
+    "seniors": "...",
+    "athletes": "..."
+  }
+}
+```
+
+### Policy Engine (Groq API)
+
+Generates government-level policy roadmaps for pollution reduction.
+
+**Input:**
+- City name
+- Current AQI
+- Dominant pollutant
+
+**Output (JSON):**
+```json
+{
+  "short_term": {
+    "duration": "3 Months",
+    "focus": "Immediate mitigation",
+    "actions": ["Action 1", "Action 2"],
+    "projected_impact": "10-15% reduction"
+  },
+  "medium_term": { ... },
+  "long_term": { ... }
+}
+```
+
+---
+
+## 8. Extending the Project
 
 ### Adding a New Model
-1.  **Define the Class**: Create a new class in `src/classical_models.py` or new file. It must implement `train` and `predict` methods.
-2.  **Register it**: Add the instance to the `CLASSICAL_MODELS` dictionary.
-3.  **Update UI**: The `dashboard/app.py` automatically picks up keys from the dictionary, so no UI changes are needed for classical models.
+
+1. **Define the Class** in `classical_models.py` or `dl_models.py`:
+   ```python
+   class NewModel:
+       def train(self, X_train, y_train, X_val=None, y_val=None): ...
+       def predict(self, X): ...
+   ```
+
+2. **Register it** in the models dictionary:
+   ```python
+   CLASSICAL_MODELS["New Model"] = NewModel()
+   ```
+
+3. **UI auto-updates** from the dictionary keys.
 
 ### Adding a New City
-1.  **Data Requirement**: You need historical weather data for the new city.
-2.  **Update Pipeline**: Modify `src/data_pipeline.py` to:
-    *   Load the new weather CSV.
-    *   Merge it when `df['City'] == 'NewCity'`.
-3.  **Rerun Pipeline**: Execute `python src/data_pipeline.py`.
+
+1. **Add to `CITY_CONFIG`** in `fetch_weather_data.py`:
+   ```python
+   "NewCity": {
+       "coords": (lat, lon),
+       "state": "Gujarat"
+   }
+   ```
+
+2. **Fetch data**:
+   ```bash
+   python scripts/fetch_weather_data.py --city NewCity --start_date 2023-01-01
+   ```
+
+3. **Run pipeline**:
+   ```python
+   from backend.app.services.data_pipeline import process_data
+   process_data('NewCity')
+   ```
+
+### Adding a New Pollutant
+
+1. Ensure the pollutant is fetched by `fetch_weather_data.py`
+2. Add to `pollutant_cols` list in `data_pipeline.py`
+3. Add CPCB breakpoints in `get_aqi_cpcb()` if needed
+
+---
+
+## 8. Troubleshooting
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| "No data files found" | Run `fetch_weather_data.py` first |
+| AQI showing 500 | Check if pollutant values are missing or out of range |
+| Duplicate columns in CSV | Pipeline auto-consolidates; check logs |
+| CO values too high | Pipeline auto-converts µg/m³ → mg/m³ |
+
+### Verification Commands
+
+```bash
+# Check December 2025 AQI values
+tail -10 data/processed/ahmedabad_features.csv | cut -d',' -f1,30
+
+# View raw data structure
+head -3 data/raw/ahmedabad_aqi.csv
+
+# Run pipeline with debug output
+python -c "from backend.app.services.data_pipeline import process_data; process_data('Ahmedabad')"
+```

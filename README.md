@@ -1,44 +1,54 @@
-# ShuddhVayu - Gujarat Air Quality Dashboard
+# ShuddhVayu - Gujarat Air Quality Intelligence Platform
 
-An interactive dashboard for air quality analysis and forecasting in Gujarat, India. This tool provides a comprehensive platform for exploring historical air quality data and generating multi-model, multi-pollutant forecasts for Ahmedabad.
-
+An end-to-end air quality analysis and forecasting platform for Gujarat, India. Features a React frontend with a FastAPI backend, powered by machine learning models for multi-pollutant forecasting.
 
 ---
 
 ## Features
 
-This application is divided into two main sections, accessible via tabs:
-
 ### 📊 Exploratory Data Analysis (EDA)
+- **City Selection:** Filter analysis for major Gujarat cities (Ahmedabad, Gandhinagar, Surat, etc.)
+- **Trend Analysis:** Compare historical trends for PM2.5, PM10, NO2, SO2, CO, O3, and AQI
+- **Pollutant Distribution:** Yearly box plots showing medians, ranges, and outliers
+- **Data Quality Insights:** Missing value analysis for raw datasets
+- **KPI Dashboard:** Real-time key performance indicators grid
 
-This tab provides a suite of tools to analyze historical air quality data for major cities in Gujarat:
-*   **City Selection:** Dynamically filter the entire analysis for a specific city (e.g., Ahmedabad, Gandhinagar).
-*   **Trend Analysis:** Superimpose and compare historical trends for multiple pollutants (PM2.5, PM10, AQI, etc.) on a single interactive chart.
-*   **Pollutant Distribution:** Visualize the yearly variation and distribution of any selected pollutant using box plots to identify medians, ranges, and outliers.
-*   **Data Quality Analysis:** View a summary of missing values from the original raw dataset to understand the initial data quality.
+### 🔮 Multi-Model Forecasting
+- **Dynamic Pollutant Selection:** Forecast any major pollutant (PM2.5, PM10, AQI, etc.)
+- **ML Algorithms:** Linear Regression, SVR, XGBoost, ANN, LSTM
+- **7-Day Forecasts:** Interactive charts with confidence intervals
+- **Model Dashboard:** Training status, performance metrics, model comparison
+- **Forecast Viewer:** Interactive visualization of predictions
 
-### 🔮 Ahmedabad Forecast
+### 🤖 AI-Powered Analysis (Groq LLM)
+- **Health Analysis:** Personalized health recommendations for:
+  - Children, Seniors, Outdoor Athletes
+  - Risk level assessment (Low/Moderate/High/Severe)
+  - Based on current and predicted AQI
+- **Policy Engine:** Government policy recommendations with:
+  - Short-term (3 months), Medium-term (6 months), Long-term (12 months) roadmaps
+  - Projected impact estimates
+  - City-specific action plans
 
-A dedicated forecasting playground for Ahmedabad's air quality, featuring:
-*   **Dynamic Pollutant Forecasting:** Select any major pollutant (PM2.5, PM10, AQI, etc.) to be the target for forecasting.
-*   **Multi-Model Selection:** Choose from multiple machine learning algorithms to train and generate forecasts:
-    *   Linear Regression
-    *   Support Vector Regressor (SVR)
-    *   XGBoost Regressor
-*   **On-Demand Model Training:** Train a new model with a single click, with all preprocessing and feature engineering handled automatically.
-*   **Model Transparency:** View key metadata for the currently loaded model, including the algorithm, training data date range, and the exact time it was last trained.
-*   **Performance Evaluation:** A clear table shows the model's performance on the 14 most recent days, comparing `Actual` vs. `Predicted` values and showing the `Error`.
-*   **7-Day Forecast Chart:** An interactive chart displays the forecast for the next 7 days, complete with a confidence interval based on the model's Mean Absolute Error (MAE).
-*   **PM2.5 Health Advisory:** When forecasting for PM2.5, the dashboard provides a clear, color-coded health advisory and recommendation for the next day.
+### 🔄 Data Operations
+- **OpenAQ Integration:** Fetch real-time pollutant data via OpenAQ API v3
+- **Open-Meteo Weather:** Historical weather data (temperature, humidity, wind)
+- **Automated Pipeline:** Feature engineering with lag features, rolling statistics
+- **Data Console:** Interactive data management interface
+- **Pipeline Status:** Real-time monitoring of data processing
+- **System Status:** Monitor available data files and trained models
 
 ---
 
 ## Technology Stack
 
-*   **Backend & Modeling:** Python, Pandas, Scikit-learn, XGBoost
-*   **Frontend & UI:** Streamlit
-*   **Data Visualization:** Plotly
-*   **Data Fetching:** Requests
+| Layer | Technologies |
+|-------|-------------|
+| **Frontend** | React, TypeScript, Tailwind CSS, Recharts |
+| **Backend** | FastAPI, Python, Pandas, NumPy |
+| **ML/AI** | Scikit-learn, XGBoost, TensorFlow/Keras |
+| **LLM** | Groq API (Llama 3.3) |
+| **Data Sources** | OpenAQ API v3, Open-Meteo Archive API |
 
 ---
 
@@ -46,19 +56,28 @@ A dedicated forecasting playground for Ahmedabad's air quality, featuring:
 
 ```
 .
-├── dashboard/
-│   └── app.py              # Main Streamlit application UI and logic
+├── frontend/               # React application
+│   ├── src/
+│   │   ├── components/     # UI components
+│   │   ├── pages/          # Route pages
+│   │   └── services/       # API clients
+│   └── package.json
+├── backend/                # FastAPI application
+│   ├── app/
+│   │   ├── main.py         # API routes
+│   │   └── services/
+│   │       ├── data_pipeline.py    # ETL & feature engineering
+│   │       ├── classical_models.py # ML model training
+│   │       └── dl_models.py        # Neural network models
+│   └── requirements.txt
 ├── data/
-│   ├── processed/          # Cleaned & feature-engineered data
-│   └── raw/                # Raw data (from Kaggle and weather API)
-├── models/                 # Saved (trained) model files
+│   ├── raw/                # Raw CSV files (AQI, weather)
+│   └── processed/          # Cleaned & feature-engineered data
+├── models/                 # Saved trained models (.pkl, .joblib)
 ├── scripts/
-│   └── fetch_weather_data.py # One-time script to download weather data
-├── src/
-│   ├── eda.py              # Functions for generating EDA plots
-│   └── models.py           # Classes and functions for multi-model training & prediction
-├── .gitignore
-├── requirements.txt
+│   └── fetch_weather_data.py   # Data fetching utility
+├── documentation/
+│   └── PROJECT_MANUAL.md   # Technical documentation
 └── README.md
 ```
 
@@ -66,54 +85,122 @@ A dedicated forecasting playground for Ahmedabad's air quality, featuring:
 
 ## Setup and Installation
 
-Follow these steps to set up and run the project locally.
+### Prerequisites
+- Python 3.10+
+- Node.js 18+
+- OpenAQ API Key (free from [openaq.org](https://explore.openaq.org/register))
 
-### 1. Clone the Repository
+### 1. Clone and Setup Environment
+
 ```bash
 git clone <your-repo-url>
-cd ShuddhVayu
-```
+cd suddhvayu
 
-### 2. Create and Activate a Virtual Environment
-Using `venv` (standard):
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-Or using `uv` (faster):
-```bash
-uv venv
-source .venv/bin/activate # On Windows: .venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-```bash
+# Backend setup
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-# Or using uv: uv pip install -r requirements.txt
+
+# Frontend setup
+cd ../frontend
+npm install
+```
+
+### 2. Configure Environment Variables
+
+Create `.env` in the project root:
+```bash
+OPENAQ_API_KEY=your_openaq_api_key_here
+```
+
+### 3. Fetch Initial Data
+
+```bash
+# Fetch weather and AQI data for Ahmedabad
+python scripts/fetch_weather_data.py --city Ahmedabad --start_date 2023-01-01 --end_date 2025-12-25
+```
+
+### 4. Run Data Pipeline
+
+```bash
+# From project root
+cd backend
+python -c "from app.services.data_pipeline import process_data; process_data('Ahmedabad')"
 ```
 
 ---
 
-## How to Run the Application
+## Running the Application
 
-The application requires a three-step process to run for the first time.
+### Development Mode
 
-### Step 1: Fetch Weather Data (One-Time Setup)
-Run this script once to download the necessary historical weather data.
 ```bash
-python scripts/fetch_weather_data.py
-```
-This will create `ahmedabad_weather.csv` in the `data/raw/` directory.
+# Terminal 1: Backend
+cd backend
+source .venv/bin/activate
+uvicorn app.main:app --reload --port 8000
 
-### Step 2: Run the Data Pipeline
-This script cleans the raw data, merges it with the weather data, and creates the final feature set for the models.
-```bash
-python src/data_pipeline.py
+# Terminal 2: Frontend
+cd frontend
+npm run dev
 ```
-**Note:** You should re-run this script whenever you update the raw data or change the feature engineering logic.
 
-### Step 3: Launch the Streamlit App
-Run the application from the root project directory.
-```bash
-python -m streamlit run dashboard/app.py
-```
+Access the app at: `http://localhost:5173`
+
+---
+
+## Data Pipeline Details
+
+### AQI Calculation (CPCB Standards)
+
+The pipeline calculates AQI using Central Pollution Control Board (CPCB) breakpoints:
+
+| Pollutant | Good (0-50) | Satisfactory (51-100) | Moderate (101-200) |
+|-----------|-------------|----------------------|-------------------|
+| PM2.5 | 0-30 µg/m³ | 31-60 µg/m³ | 61-90 µg/m³ |
+| PM10 | 0-50 µg/m³ | 51-100 µg/m³ | 101-250 µg/m³ |
+| NO2 | 0-40 µg/m³ | 41-80 µg/m³ | 81-180 µg/m³ |
+| CO | 0-1 mg/m³ | 1.1-2 mg/m³ | 2.1-10 mg/m³ |
+
+### Data Quality Handling
+
+- **Duplicate Sensors:** Automatically consolidated (PM2.5 + PM2.5.1 → mean)
+- **Missing Values:** Linear interpolation with bidirectional fill
+- **Unit Conversion:** CO auto-converted from µg/m³ to mg/m³ when needed
+
+---
+
+## API Endpoints
+
+### Core Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/api/history/{city}` | GET | Historical pollutant trends |
+| `/api/distribution/{city}` | GET | Pollutant distribution data |
+| `/api/system-status` | GET | Available data files and models |
+
+### Model Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/train` | POST | Train ML model (background task) |
+| `/api/predict` | POST | Generate 7-day forecast |
+
+### AI Analysis Endpoints (Groq LLM)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/analyze-health` | POST | Health recommendations by demographic |
+| `/api/analyze-policy` | POST | Government policy roadmap |
+
+### Data Operations Endpoints
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/fetch-weather` | POST | Fetch external data (background) |
+| `/api/process-features` | POST | Run data pipeline (background) |
+
+---
+
+## License
+
+MIT License - See LICENSE file for details.
